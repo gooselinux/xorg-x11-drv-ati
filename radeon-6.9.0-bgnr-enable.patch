@@ -1,0 +1,83 @@
+diff -up xf86-video-ati-6.13.0/src/drmmode_display.c.da xf86-video-ati-6.13.0/src/drmmode_display.c
+--- xf86-video-ati-6.13.0/src/drmmode_display.c.da	2010-05-07 14:48:38.000000000 +1000
++++ xf86-video-ati-6.13.0/src/drmmode_display.c	2010-05-07 14:48:59.000000000 +1000
+@@ -195,7 +195,7 @@ create_pixmap_for_fbcon(drmmode_ptr drmm
+ 	return pixmap;
+ }
+ 
+-void drmmode_copy_fb(ScrnInfoPtr pScrn, drmmode_ptr drmmode)
++static Bool drmmode_copy_fb(ScrnInfoPtr pScrn, drmmode_ptr drmmode)
+ {
+ 	xf86CrtcConfigPtr   xf86_config = XF86_CRTC_CONFIG_PTR(pScrn);
+ 	RADEONInfoPtr info = RADEONPTR(pScrn);
+@@ -207,7 +207,7 @@ void drmmode_copy_fb(ScrnInfoPtr pScrn, 
+ 	Bool ret;
+ 
+ 	if (info->accelOn == FALSE)
+-		return;
++		return FALSE;
+ 
+ 	for (i = 0; i < xf86_config->num_crtc; i++) {
+ 		xf86CrtcPtr crtc = xf86_config->crtc[i];
+@@ -220,14 +220,16 @@ void drmmode_copy_fb(ScrnInfoPtr pScrn, 
+ 
+ 	src = create_pixmap_for_fbcon(drmmode, pScrn, crtc_id);
+ 	if (!src)
+-		return;
++		return FALSE;
+ 
+ 	dst = drmmode_create_bo_pixmap(pScreen, pScrn->virtualX,
+ 				       pScrn->virtualY, pScrn->depth,
+ 				       pScrn->bitsPerPixel, pitch,
+ 				       info->front_bo);
+-	if (!dst)
++	if (!dst) {
++		ret = FALSE;
+ 		goto out_free_src;
++	}
+ 
+ 	ret = info->accel_state->exa->PrepareCopy (src, dst,
+ 						   -1, -1, GXcopy, FB_ALLONES);
+@@ -241,6 +243,7 @@ void drmmode_copy_fb(ScrnInfoPtr pScrn, 
+ 	drmmode_destroy_bo_pixmap(dst);
+  out_free_src:
+ 	drmmode_destroy_bo_pixmap(src);
++	return ret;
+ 
+ }
+ 
+@@ -1215,7 +1218,9 @@ Bool drmmode_set_desired_modes(ScrnInfoP
+ 	xf86CrtcConfigPtr   config = XF86_CRTC_CONFIG_PTR(pScrn);
+ 	int c;
+ 
+-	drmmode_copy_fb(pScrn, drmmode);
++	if (drmmode_copy_fb(pScrn, drmmode) == FALSE) {
++		pScrn->canDoBGNoneRoot = 0;
++	}
+ 
+ 	for (c = 0; c < config->num_crtc; c++) {
+ 		xf86CrtcPtr	crtc = config->crtc[c];
+diff -up xf86-video-ati-6.13.0/src/drmmode_display.h.da xf86-video-ati-6.13.0/src/drmmode_display.h
+--- xf86-video-ati-6.13.0/src/drmmode_display.h.da	2010-05-07 14:48:38.000000000 +1000
++++ xf86-video-ati-6.13.0/src/drmmode_display.h	2010-05-07 14:48:59.000000000 +1000
+@@ -86,7 +86,6 @@ extern Bool drmmode_set_bufmgr(ScrnInfoP
+ extern void drmmode_set_cursor(ScrnInfoPtr scrn, drmmode_ptr drmmode, int id, struct radeon_bo *bo);
+ void drmmode_adjust_frame(ScrnInfoPtr pScrn, drmmode_ptr drmmode, int x, int y, int flags);
+ extern Bool drmmode_set_desired_modes(ScrnInfoPtr pScrn, drmmode_ptr drmmode);
+-extern void drmmode_copy_fb(ScrnInfoPtr pScrn, drmmode_ptr drmmode);
+ extern Bool drmmode_setup_colormap(ScreenPtr pScreen, ScrnInfoPtr pScrn);
+ 
+ extern void drmmode_uevent_init(ScrnInfoPtr scrn, drmmode_ptr drmmode);
+diff -up xf86-video-ati-6.13.0/src/radeon_kms.c.da xf86-video-ati-6.13.0/src/radeon_kms.c
+--- xf86-video-ati-6.13.0/src/radeon_kms.c.da	2010-05-07 14:48:38.000000000 +1000
++++ xf86-video-ati-6.13.0/src/radeon_kms.c	2010-05-07 14:48:59.000000000 +1000
+@@ -430,6 +430,9 @@ Bool RADEONPreInit_KMS(ScrnInfoPtr pScrn
+     if (pScrn->numEntities != 1) return FALSE;
+     if (!RADEONGetRec(pScrn)) return FALSE;
+ 
++    /* kms bg root enable */
++    pScrn->canDoBGNoneRoot = 1;
++
+     info               = RADEONPTR(pScrn);
+     info->MMIO         = NULL;
+     info->IsSecondary  = FALSE;

@@ -1,0 +1,28 @@
+From ecc8a547043982d3da3cbe9874cdcf4e5c51f181 Mon Sep 17 00:00:00 2001
+From: Dave Airlie <airlied@redhat.com>
+Date: Thu, 25 Feb 2010 12:13:12 +1000
+Subject: [PATCH] radeon: add support to prefer clone mode on servers
+
+---
+ src/radeon_driver.c |    5 +++++
+ 1 files changed, 5 insertions(+), 0 deletions(-)
+
+diff --git a/src/radeon_driver.c b/src/radeon_driver.c
+index 9a4cb9a..3081a88 100644
+--- a/src/radeon_driver.c
++++ b/src/radeon_driver.c
+@@ -1902,6 +1902,11 @@ static Bool RADEONPreInitChipType(ScrnInfoPtr pScrn)
+ 	break;
+     }
+ 
++#ifdef XF86_SCRN_HAS_PREFER_CLONE
++    if (!pRADEONEnt->HasCRTC2 || info->IsDellServer)
++	pScrn->preferClone = 1;
++#endif
++
+     from               = X_PROBED;
+     info->LinearAddr   = PCI_REGION_BASE(info->PciInfo, 0, REGION_MEM) & ~0x1ffffffULL;
+     pScrn->memPhysBase = info->LinearAddr;
+-- 
+1.6.5.2
+

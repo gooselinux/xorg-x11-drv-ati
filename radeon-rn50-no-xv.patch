@@ -1,0 +1,34 @@
+From eb5665688ef9b52f03f61546351d0848cab54740 Mon Sep 17 00:00:00 2001
+From: Alex Deucher <alexdeucher@gmail.com>
+Date: Thu, 8 Apr 2010 00:31:52 -0400
+Subject: [PATCH] radeon: don't setup Xv on rn50
+
+It has no overlay or 3D engine.
+
+fixes fdo bug 27528
+---
+ src/radeon_video.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/src/radeon_video.c b/src/radeon_video.c
+index 8f0917f..5e2a723 100644
+--- a/src/radeon_video.c
++++ b/src/radeon_video.c
+@@ -271,10 +271,14 @@ void RADEONInitVideo(ScreenPtr pScreen)
+ {
+     ScrnInfoPtr pScrn = xf86Screens[pScreen->myNum];
+     RADEONInfoPtr    info = RADEONPTR(pScrn);
++    RADEONEntPtr pRADEONEnt = RADEONEntPriv(pScrn);
+     XF86VideoAdaptorPtr *adaptors, *newAdaptors = NULL;
+     XF86VideoAdaptorPtr overlayAdaptor = NULL, texturedAdaptor = NULL;
+     int num_adaptors;
+ 
++    /* no overlay or 3D on RN50 */
++    if (info->ChipFamily == CHIP_FAMILY_RV100 && !pRADEONEnt->HasCRTC2)
++	    return;
+ 
+     num_adaptors = xf86XVListGenericAdaptors(pScrn, &adaptors);
+     newAdaptors = xalloc((num_adaptors + 2) * sizeof(XF86VideoAdaptorPtr *));
+-- 
+1.6.6.1
+

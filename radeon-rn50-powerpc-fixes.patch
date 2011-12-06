@@ -1,0 +1,34 @@
+diff --git a/src/drmmode_display.c b/src/drmmode_display.c
+index 686de5e..c427bf1 100644
+--- a/src/drmmode_display.c
++++ b/src/drmmode_display.c
+@@ -722,6 +722,7 @@ drmmode_output_create_resources(xf86OutputPtr output)
+ 
+ 	if (drmmode_prop->flags & DRM_MODE_PROP_RANGE) {
+ 	    INT32 range[2];
++	    INT32 value = p->value;
+ 
+ 	    p->num_atoms = 1;
+ 	    p->atoms = xcalloc(p->num_atoms, sizeof(Atom));
+@@ -739,7 +740,7 @@ drmmode_output_create_resources(xf86OutputPtr output)
+ 			"RRConfigureOutputProperty error, %d\n", err);
+ 	    }
+ 	    err = RRChangeOutputProperty(output->randr_output, p->atoms[0],
+-		    XA_INTEGER, 32, PropModeReplace, 1, &p->value, FALSE, TRUE);
++		    XA_INTEGER, 32, PropModeReplace, 1, &value, FALSE, TRUE);
+ 	    if (err != 0) {
+ 		xf86DrvMsg(output->scrn->scrnIndex, X_ERROR,
+ 			"RRChangeOutputProperty error, %d\n", err);
+diff --git a/src/radeon_kms.c b/src/radeon_kms.c
+index 317dacb..b2c4064 100644
+--- a/src/radeon_kms.c
++++ b/src/radeon_kms.c
+@@ -1008,7 +1008,7 @@ static Bool radeon_setup_kernel_mem(ScreenPtr pScreen)
+ 
+ #if X_BYTE_ORDER == X_BIG_ENDIAN
+ 		radeon_bo_set_tiling(info->cursor_bo[c], RADEON_TILING_SWAP_32BIT |
+-				     RADEON_TILING_SURFACE, stride);
++				     RADEON_TILING_SURFACE, CURSOR_WIDTH);
+ #endif
+ 
+                 if (radeon_bo_map(info->cursor_bo[c], 1)) {

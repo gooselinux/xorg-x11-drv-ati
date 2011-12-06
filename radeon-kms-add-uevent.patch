@@ -1,0 +1,217 @@
+From a69e749d0562887af6bd236c38802472e54640c4 Mon Sep 17 00:00:00 2001
+From: Dave Airlie <airlied@redhat.com>
+Date: Fri, 16 Apr 2010 13:58:54 +1000
+Subject: [PATCH] kms: add uevent support.
+
+When we get a hotplug event from the kernel we should notify the client side to reconfigure displays.
+
+based on work by ajax in intel driver.
+
+Signed-off-by: Dave Airlie <airlied@redhat.com>
+---
+ configure.ac          |    7 +++++
+ src/Makefile.am       |    5 ++++
+ src/drmmode_display.c |   64 +++++++++++++++++++++++++++++++++++++++++++++++++
+ src/drmmode_display.h |   13 +++++++++-
+ src/radeon_kms.c      |    2 +
+ 5 files changed, 90 insertions(+), 1 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index b9274d6..cf0a855 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -152,6 +152,10 @@ if test "$DRI" = yes; then
+                         else
+                                 DRM_MODE=no
+ 			fi
++			PKG_CHECK_MODULES(LIBUDEV, [libudev], [LIBUDEV=yes], [LIBUDEV=no])
++			if test "x$LIBUDEV" = xyes; then
++			       AC_DEFINE(HAVE_LIBUDEV, 1,[libudev support])
++			fi
+         	fi
+ 	fi
+ 	CFLAGS="$save_CFLAGS"
+@@ -159,6 +163,7 @@ else
+ 	DRM_MODE=no
+ fi
+ AM_CONDITIONAL(DRM_MODE, test x$DRM_MODE = xyes)
++AM_CONDITIONAL(LIBUDEV, test x$LIBUDEV = xyes)
+ 
+ save_CFLAGS="$CFLAGS"
+ CFLAGS="$XORG_CFLAGS"
+@@ -358,6 +363,8 @@ AC_SUBST([XORG_CFLAGS])
+ AC_SUBST([DRI_CFLAGS])
+ AC_SUBST([LIBDRM_RADEON_CFLAGS])
+ AC_SUBST([LIBDRM_RADEON_LIBS])
++AC_SUBST([LIBUDEV_CFLAGS])
++AC_SUBST([LIBUDEV_LIBS])
+ AC_SUBST([moduledir])
+ 
+ DRIVER_NAME=ati
+diff --git a/src/Makefile.am b/src/Makefile.am
+index 0f89480..0ce46b0 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -78,6 +78,7 @@ AM_CFLAGS = \
+             @XORG_CFLAGS@ \
+             @DRI_CFLAGS@ \
+             @XMODES_CFLAGS@ \
++            @LIBUDEV_CFLAGS@ \
+             -DDISABLE_EASF \
+             -DENABLE_ALL_SERVICE_FUNCTIONS \
+             -DATOM_BIOS \
+@@ -91,6 +92,10 @@ ati_drv_la_LIBADD = $(PCIACCESS_LIBS)
+ radeon_drv_la_LIBADD += $(PCIACCESS_LIBS)
+ endif
+ 
++if LIBUDEV
++radeon_drv_la_LIBADD += $(LIBUDEV_LIBS)
++endif
++
+ ati_drv_la_LTLIBRARIES = ati_drv.la
+ ati_drv_la_LDFLAGS = -module -avoid-version
+ ati_drv_ladir = @moduledir@/drivers
+diff --git a/src/drmmode_display.c b/src/drmmode_display.c
+index 399a6a7..cadd176 100644
+--- a/src/drmmode_display.c
++++ b/src/drmmode_display.c
+@@ -1159,6 +1159,7 @@ Bool drmmode_pre_init(ScrnInfoPtr pScrn, drmmode_ptr drmmode, int cpp)
+ 	xf86CrtcConfigInit(pScrn, &drmmode_xf86crtc_config_funcs);
+ 	xf86_config = XF86_CRTC_CONFIG_PTR(pScrn);
+ 
++	drmmode->scrn = pScrn;
+ 	drmmode->cpp = cpp;
+ 	drmmode->mode_res = drmModeGetResources(drmmode->fd);
+ 	if (!drmmode->mode_res)
+@@ -1347,4 +1348,67 @@ Bool drmmode_setup_colormap(ScreenPtr pScreen, ScrnInfoPtr pScrn)
+          return FALSE;
+     return TRUE;
+ }
++
++#ifdef HAVE_LIBUDEV
++static void
++drmmode_handle_uevents(int fd, void *closure)
++{
++	drmmode_ptr drmmode = closure;
++	ScrnInfoPtr scrn = drmmode->scrn;
++	struct udev_device *dev;
++	dev = udev_monitor_receive_device(drmmode->uevent_monitor);
++	if (!dev)
++		return;
++
++	RRGetInfo(screenInfo.screens[scrn->scrnIndex], TRUE);
++	udev_device_unref(dev);
++}
++#endif
++
++void drmmode_uevent_init(ScrnInfoPtr scrn, drmmode_ptr drmmode)
++{
++#ifdef HAVE_LIBUDEV
++	struct udev *u;
++	struct udev_monitor *mon;
++
++	u = udev_new();
++	if (!u)
++		return;
++	mon = udev_monitor_new_from_netlink(u, "udev");
++	if (!mon) {
++		udev_unref(u);
++		return;
++	}
++
++	if (udev_monitor_filter_add_match_subsystem_devtype(mon,
++							    "drm",
++							    "drm_minor") < 0 ||
++	    udev_monitor_enable_receiving(mon) < 0) {
++		udev_monitor_unref(mon);
++		udev_unref(u);
++		return;
++	}
++
++	drmmode->uevent_handler =
++		xf86AddGeneralHandler(udev_monitor_get_fd(mon),
++				      drmmode_handle_uevents,
++				      drmmode);
++
++	drmmode->uevent_monitor = mon;
++#endif
++}
++
++void drmmode_uevent_fini(ScrnInfoPtr scrn, drmmode_ptr drmmode)
++{
++#ifdef HAVE_LIBUDEV
++	if (drmmode->uevent_handler) {
++		struct udev *u = udev_monitor_get_udev(drmmode->uevent_monitor);
++		xf86RemoveGeneralHandler(drmmode->uevent_handler);
++
++		udev_monitor_unref(drmmode->uevent_monitor);
++		udev_unref(u);
++	}
++#endif
++}
++
+ #endif
+diff --git a/src/drmmode_display.h b/src/drmmode_display.h
+index 2e76259..86caabb 100644
+--- a/src/drmmode_display.h
++++ b/src/drmmode_display.h
+@@ -30,6 +30,9 @@
+ #ifdef XF86DRM_MODE
+ 
+ #include "xf86drmMode.h"
++#ifdef HAVE_LIBUDEV
++#include "libudev.h"
++#endif
+ 
+ #include "radeon_probe.h"
+ 
+@@ -40,10 +43,14 @@ typedef struct {
+   drmModeFBPtr mode_fb;
+   int cpp;
+   struct radeon_bo_manager *bufmgr;
++  ScrnInfoPtr scrn;
++#ifdef HAVE_LIBUDEV
++  struct udev_monitor *uevent_monitor;
++  InputHandlerProc uevent_handler;
++#endif
+ } drmmode_rec, *drmmode_ptr;
+ 
+ typedef struct {
+-
+     drmmode_ptr drmmode;
+     drmModeCrtcPtr mode_crtc;
+     struct radeon_bo *cursor_bo;
+@@ -81,6 +88,10 @@ void drmmode_adjust_frame(ScrnInfoPtr pScrn, drmmode_ptr drmmode, int x, int y,
+ extern Bool drmmode_set_desired_modes(ScrnInfoPtr pScrn, drmmode_ptr drmmode);
+ extern void drmmode_copy_fb(ScrnInfoPtr pScrn, drmmode_ptr drmmode);
+ extern Bool drmmode_setup_colormap(ScreenPtr pScreen, ScrnInfoPtr pScrn);
++
++extern void drmmode_uevent_init(ScrnInfoPtr scrn, drmmode_ptr drmmode);
++extern void drmmode_uevent_fini(ScrnInfoPtr scrn, drmmode_ptr drmmode);
++
+ #endif
+ 
+ #endif
+diff --git a/src/radeon_kms.c b/src/radeon_kms.c
+index 15e5e3f..e33c9ef 100644
+--- a/src/radeon_kms.c
++++ b/src/radeon_kms.c
+@@ -601,6 +601,7 @@ static Bool RADEONCloseScreen_KMS(int scrnIndex, ScreenPtr pScreen)
+     xf86DrvMsgVerb(pScrn->scrnIndex, X_INFO, RADEON_LOGLEVEL_DEBUG,
+ 		   "RADEONCloseScreen\n");
+ 
++    drmmode_uevent_fini(pScrn, &info->drmmode);
+     if (info->cs)
+       radeon_cs_flush_indirect(pScrn);
+ 
+@@ -866,6 +867,7 @@ Bool RADEONScreenInit_KMS(int scrnIndex, ScreenPtr pScreen,
+     info->accel_state->XInited3D = FALSE;
+     info->accel_state->engineMode = EXA_ENGINEMODE_UNKNOWN;
+ 
++    drmmode_uevent_init(pScrn, &info->drmmode);
+     return TRUE;
+ }
+ 
+-- 
+1.6.5.2
+
